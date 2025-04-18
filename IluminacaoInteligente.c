@@ -5,6 +5,7 @@
 #include "hardware/pwm.h"
 #include "hardware/pio.h"
 #include "hardware/timer.h"
+#include "hardware/clocks.h"
 #include "hardware/uart.h"
 #include "inc/ssd1306.h"
 #include "inc/font.h"
@@ -15,6 +16,7 @@
 #define JOYSTICK_Y 27  // ADC1
 #define BOTAO_A 5
 #define BOTAO_B 6
+#define WS2812_PIN 7    //Pino do WS2812
 #define BOTAO_JOYSTICK 22
 #define LED_RED 13
 #define LED_BLUE 12
@@ -25,7 +27,13 @@
 #define IS_RGBW false   //Maquina PIO para RGBW
 #define NUM_PIXELS 25   //Quantidade de LEDs na matriz
 #define NUM_NUMBERS 11  //Quantidade de numeros na matriz
+
 uint volatile numero = 0;      //Variável para inicializar o numero com 0, indicando a camera 0 (WS2812B)
+uint16_t adc_x = 0, adc_y = 0;
+bool modo_monitoramento = false;
+uint32_t tempo_ultimo_evento = 0;
+bool alerta = false;
+uint32_t tempo_sem_movimento = 0;
 
 //Display SSD1306
 ssd1306_t ssd;
@@ -155,23 +163,29 @@ void inicializar_componentes(){
     stdio_init_all();
 
     // Inicializa botões
-    gpio_init(BOTAO_B);
-    gpio_set_dir(BOTAO_B, GPIO_IN);
-    gpio_pull_up(BOTAO_B);
-    
     gpio_init(BOTAO_A);
     gpio_set_dir(BOTAO_A, GPIO_IN);
     gpio_pull_up(BOTAO_A);
 
-    // Inicializa LED Verde (controle por botão)
+    gpio_init(BOTAO_B);
+    gpio_set_dir(BOTAO_B, GPIO_IN);
+    gpio_pull_up(BOTAO_B);
+
+    // Inicializa LED Vermelho
     gpio_init(LED_RED);
     gpio_set_dir(LED_RED, GPIO_OUT);
     gpio_put(LED_RED, 0);
-    // Inicializa LED Verde (controle por botão)
+    // Inicializa LED Verde
     gpio_init(LED_GREEN);
     gpio_set_dir(LED_GREEN, GPIO_OUT);
     gpio_put(LED_GREEN, 0);
 
+    //Inicializa o pio
+    PIO pio = pio0;
+    int sm = 0;
+    uint offset = pio_add_program(pio, &ws2812_program);
+    ws2812_program_init(pio, sm, offset, WS2812_PIN, 800000, IS_RGBW);
+    
     // Inicializa ADC para leitura do Joystick
     adc_init();
     adc_gpio_init(JOYSTICK_X);
@@ -198,9 +212,16 @@ void inicializar_componentes(){
     ssd1306_send_data(&ssd);
 }
 
-//Funcao para acionar o buzzer
-void acionar_buzzer(){
-
+// === ALERTA ===
+void ativar_alerta() {
+    gpio_put(LED_RED, 1);
+    gpio_put(BUZZER_PIN, 1);
+    alerta = true;
+}
+void desativar_alerta() {
+    gpio_put(LED_RED, 0);
+    gpio_put(BUZZER_PIN, 0);
+    alerta = false;
 }
 
 // Debounce do botão (evita leituras falsas)
@@ -217,16 +238,18 @@ bool debounce_botao(uint gpio){
 
 //Função para as chamadas de interrupções nos botões A e do Joystick
 void gpio_irq_handler(uint gpio, uint32_t events){
-    if(debounce_botao(BOTAO_A)){
-        gpio_put(LED_RED, !gpio_get(LED_RED)); // Atualiza LED
+    if (gpio == BOTAO_A && debounce_botao(BOTAO_A)){
+    numero++;   //Incrementa o valor do numero (matriz de leds)
+        if(numero == 10){
+            numero = 0; //Retorna ao 0
+        }
+    set_one_led(led_r, led_g, led_b, numero);
     }
-    if(debounce_botao(BOTAO_B)){
-        gpio_put(LED_GREEN, !gpio_get(LED_GREEN)); // Atualiza LED
+    if(gpio == BOTAO_B && debounce_botao(BOTAO_B)) {
+        modo_monitoramento = !modo_monitoramento;
     }
 }
 
-
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //Posição inicial do quadrado (centralizado no display)
 int pos_y = 32;
 int pos_x = 64;
@@ -243,7 +266,7 @@ int map(int valor, int in_min, int in_max, int out_min, int out_max) {
     return (valor - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
 
-void mover_quadrado(){
+void loop_display_quadrado() {
     //Lê valores do joystick
     adc_select_input(0); //Eixo Y
     uint16_t valor_y = adc_read();
@@ -258,25 +281,68 @@ void mover_quadrado(){
     //Atualiza o display
     ssd1306_fill(&ssd, false); //Limpa a tela
 
-    //Desenha uma borda simples
+    //bordas
     ssd1306_rect(&ssd, 0, 0, 128, 64, true, false);
+    ssd1306_rect(&ssd, 1, 1, 128 - 2, 64 - 2, true, false);
+    ssd1306_rect(&ssd, 2, 2, 128 - 4, 64 - 4, true, false);
+    ssd1306_rect(&ssd, 3, 3, 128 - 6, 64 - 6, true, false);
 
     //Desenha o quadrado que se move
     ssd1306_rect(&ssd, pos_y, pos_x, tamanho_quadrado, tamanho_quadrado, true, true);
     ssd1306_send_data(&ssd); // Envia para o display
 }
 
+void loop_display_info(uint16_t x, uint16_t y) {
+    char linha1[20], linha2[20], linha3[30];
+    sprintf(linha1, "Area: %d", numero);
+    sprintf(linha2, "Luz: %.1f%%", (x / 4095.0) * 100);
+    sprintf(linha3, "Presenca: %s", y > 2000 ? "SIM" : "NAO");
 
+    ssd1306_fill(&ssd, false);
+    ssd1306_draw_string(&ssd, linha1, 10, 10);
+    ssd1306_draw_string(&ssd, linha2, 10, 30);
+    ssd1306_draw_string(&ssd, linha3, 10, 50);
+    ssd1306_send_data(&ssd);
+}
 
 int main(){
     inicializar_componentes(); //Inicializar GPIOs, protocolos, comunicação...
-    
+
+    set_one_led(led_r, led_g, led_b, 0); //Inicia a simulação monitorando o endereço 0
+
     //Configura as chamadas de interrupções para os botões A e do Joystick
     gpio_set_irq_enabled_with_callback(BOTAO_A, GPIO_IRQ_EDGE_FALL, true, &gpio_irq_handler);
     gpio_set_irq_enabled_with_callback(BOTAO_B, GPIO_IRQ_EDGE_FALL, true, &gpio_irq_handler);
 
     while(true){
+        adc_select_input(0); adc_x = adc_read();
+        adc_select_input(1); adc_y = adc_read();
 
+        // Luminosidade da matriz
+        uint8_t intensidade = (adc_x * 255) / 4095;
+        set_one_led(intensidade, 0, 0, numero);
+
+        // Presença
+        if (adc_y < 1000) {
+            if (!alerta) {
+                if (tempo_sem_movimento == 0) tempo_sem_movimento = to_ms_since_boot(get_absolute_time());
+                if (to_ms_since_boot(get_absolute_time()) - tempo_sem_movimento > 3000) {
+                    ativar_alerta();
+                }
+            }
+        } else {
+            tempo_sem_movimento = 0;
+            if (alerta) desativar_alerta();
+        }
+
+        // UART LOG
+        printf("[Area %d] Luz: %.2f%% - Presenca: %s\n", numero, (adc_x / 4095.0) * 100, adc_y > 1000 ? "SIM" : "NAO");
+
+        // Display
+        if (modo_monitoramento) loop_display_info(adc_x, adc_y);
+        else loop_display_quadrado(adc_x, adc_y);
+
+        sleep_ms(100);
     }
     return 0;
 }
