@@ -1,0 +1,282 @@
+#include <stdio.h>
+#include "pico/stdlib.h"
+#include "hardware/adc.h"
+#include "hardware/i2c.h"
+#include "hardware/pwm.h"
+#include "hardware/pio.h"
+#include "hardware/timer.h"
+#include "hardware/uart.h"
+#include "inc/ssd1306.h"
+#include "inc/font.h"
+#include "ws2812.pio.h"
+
+//Definição de GPIOs
+#define JOYSTICK_X 26  // ADC0
+#define JOYSTICK_Y 27  // ADC1
+#define BOTAO_A 5
+#define BOTAO_B 6
+#define BOTAO_JOYSTICK 22
+#define LED_RED 13
+#define LED_BLUE 12
+#define LED_GREEN 11
+#define BUZZER_PIN 21   //Pino do buzzer
+#define I2C_SDA 14
+#define I2C_SCL 15
+#define IS_RGBW false   //Maquina PIO para RGBW
+#define NUM_PIXELS 25   //Quantidade de LEDs na matriz
+#define NUM_NUMBERS 11  //Quantidade de numeros na matriz
+uint volatile numero = 0;      //Variável para inicializar o numero com 0, indicando a camera 0 (WS2812B)
+
+//Display SSD1306
+ssd1306_t ssd;
+//Variável global para armazenar a cor (Entre 0 e 255 para intensidade)
+uint8_t led_r = 20; //Intensidade do vermelho
+uint8_t led_g = 0; //Intensidade do verde
+uint8_t led_b = 0; //Intensidade do azul
+
+//Função para ligar um LED
+static inline void put_pixel(uint32_t pixel_grb){
+    pio_sm_put_blocking(pio0, 0, pixel_grb << 8u);
+}
+
+//Função para converter cores RGB para um valor de 32 bits
+static inline uint32_t urgb_u32(uint8_t r, uint8_t g, uint8_t b){
+    return ((uint32_t)(r) << 8) | ((uint32_t)(g) << 16) | (uint32_t)(b);
+}
+
+bool led_numeros[NUM_NUMBERS][NUM_PIXELS] = {
+    //Número 0
+    {
+    0, 1, 1, 1, 0,      
+    0, 1, 0, 1, 0, 
+    0, 1, 0, 1, 0,   
+    0, 1, 0, 1, 0,  
+    0, 1, 1, 1, 0   
+    },
+
+    //Número 1
+    {0, 1, 1, 1, 0,      
+    0, 0, 1, 0, 0, 
+    0, 0, 1, 0, 0,    
+    0, 1, 1, 0, 0,  
+    0, 0, 1, 0, 0   
+    },
+
+    //Número 2
+    {0, 1, 1, 1, 0,      
+    0, 1, 0, 0, 0, 
+    0, 1, 1, 1, 0,    
+    0, 0, 0, 1, 0,
+    0, 1, 1, 1, 0   
+    },
+
+    //Número 3
+    {0, 1, 1, 1, 0,      
+    0, 0, 0, 1, 0, 
+    0, 1, 1, 1, 0,    
+    0, 0, 0, 1, 0,  
+    0, 1, 1, 1, 0   
+    },
+
+    //Número 4
+    {0, 1, 0, 0, 0,      
+    0, 0, 0, 1, 0, 
+    0, 1, 1, 1, 0,    
+    0, 1, 0, 1, 0,     
+    0, 1, 0, 1, 0   
+    },
+
+    //Número 5
+    {0, 1, 1, 1, 0,      
+    0, 0, 0, 1, 0, 
+    0, 1, 1, 1, 0,   
+    0, 1, 0, 0, 0,  
+    0, 1, 1, 1, 0   
+    },
+
+    //Número 6
+    {0, 1, 1, 1, 0,      
+    0, 1, 0, 1, 0, 
+    0, 1, 1, 1, 0,    
+    0, 1, 0, 0, 0,  
+    0, 1, 1, 1, 0   
+    },
+
+    //Número 7
+    {0, 1, 0, 0, 0,      
+    0, 0, 0, 1, 0,   
+    0, 1, 0, 0, 0,    
+    0, 0, 0, 1, 0,  
+    0, 1, 1, 1, 0  
+    },
+
+    //Número 8
+    {0, 1, 1, 1, 0,      
+    0, 1, 0, 1, 0, 
+    0, 1, 1, 1, 0,    
+    0, 1, 0, 1, 0,  
+    0, 1, 1, 1, 0   
+    },
+
+    //Número 9
+    {0, 1, 1, 1, 0,      
+    0, 0, 0, 1, 0, 
+    0, 1, 1, 1, 0,    
+    0, 1, 0, 1, 0,  
+    0, 1, 1, 1, 0   
+    },
+
+    //APAGAR OS LEDS, representado pelo número (posição) 10
+    {0, 0, 0, 0, 0,      
+    0, 0, 0, 0, 0, 
+    0, 0, 0, 0, 0,    
+    0, 0, 0, 0, 0,  
+    0, 0, 0, 0, 0   
+    }
+};
+
+//Função para envio dos dados para a matriz de leds
+void set_one_led(uint8_t r, uint8_t g, uint8_t b, int numero){
+    //Define a cor com base nos parâmetros fornecidos
+    uint32_t color = urgb_u32(r, g, b);
+
+    //Define todos os LEDs com a cor especificada
+    for(int i = 0; i < NUM_PIXELS; i++){
+        if(led_numeros[numero][i]){     //Chama a matriz de leds com base no numero passado
+            put_pixel(color);           //Liga o LED com um no buffer
+        }else{
+            put_pixel(0);               //Desliga os LEDs com zero no buffer
+        }
+    }
+}
+
+//Função para modularizar a inicialização do hardware
+void inicializar_componentes(){
+    stdio_init_all();
+
+    // Inicializa botões
+    gpio_init(BOTAO_B);
+    gpio_set_dir(BOTAO_B, GPIO_IN);
+    gpio_pull_up(BOTAO_B);
+    
+    gpio_init(BOTAO_A);
+    gpio_set_dir(BOTAO_A, GPIO_IN);
+    gpio_pull_up(BOTAO_A);
+
+    // Inicializa LED Verde (controle por botão)
+    gpio_init(LED_RED);
+    gpio_set_dir(LED_RED, GPIO_OUT);
+    gpio_put(LED_RED, 0);
+    // Inicializa LED Verde (controle por botão)
+    gpio_init(LED_GREEN);
+    gpio_set_dir(LED_GREEN, GPIO_OUT);
+    gpio_put(LED_GREEN, 0);
+
+    // Inicializa ADC para leitura do Joystick
+    adc_init();
+    adc_gpio_init(JOYSTICK_X);
+    adc_gpio_init(JOYSTICK_Y);
+
+    // Inicializa buzzer
+    gpio_init(BUZZER_PIN);
+    gpio_set_dir(BUZZER_PIN, GPIO_OUT);
+    gpio_put(BUZZER_PIN, 0);
+
+    //Inicializa I2C para o display SSD1306
+    i2c_init(i2c1, 400 * 1000);
+    gpio_set_function(I2C_SDA, GPIO_FUNC_I2C);  //Dados
+    gpio_set_function(I2C_SCL, GPIO_FUNC_I2C);  //Clock
+    //Define como resistor de pull-up interno
+    gpio_pull_up(I2C_SDA);
+    gpio_pull_up(I2C_SCL);
+    
+    // Inicializa display
+    ssd1306_init(&ssd, 128, 64, false, 0x3C, i2c1);
+    ssd1306_config(&ssd);
+    ssd1306_send_data(&ssd);
+    ssd1306_fill(&ssd, false);
+    ssd1306_send_data(&ssd);
+}
+
+//Funcao para acionar o buzzer
+void acionar_buzzer(){
+
+}
+
+// Debounce do botão (evita leituras falsas)
+bool debounce_botao(uint gpio){
+    static uint32_t ultimo_tempo = 0;
+    uint32_t tempo_atual = to_ms_since_boot(get_absolute_time());
+
+    if (gpio_get(gpio) == 0 && (tempo_atual - ultimo_tempo) > 200){ // 200ms de debounce
+        ultimo_tempo = tempo_atual;
+        return true;
+    }
+    return false;
+}
+
+//Função para as chamadas de interrupções nos botões A e do Joystick
+void gpio_irq_handler(uint gpio, uint32_t events){
+    if(debounce_botao(BOTAO_A)){
+        gpio_put(LED_RED, !gpio_get(LED_RED)); // Atualiza LED
+    }
+    if(debounce_botao(BOTAO_B)){
+        gpio_put(LED_GREEN, !gpio_get(LED_GREEN)); // Atualiza LED
+    }
+}
+
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//Posição inicial do quadrado (centralizado no display)
+int pos_y = 32;
+int pos_x = 64;
+const int tamanho_quadrado = 8;
+
+//Define limites do display para o quadrado, respeitando as bordas
+const int limite_y_min = 10;
+const int limite_y_max = 54 - tamanho_quadrado;
+const int limite_x_min = 10; 
+const int limite_x_max = 118 - tamanho_quadrado;
+
+//Função para mapear valores de um intervalo para outro
+int map(int valor, int in_min, int in_max, int out_min, int out_max) {
+    return (valor - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+}
+
+void mover_quadrado(){
+    //Lê valores do joystick
+    adc_select_input(0); //Eixo Y
+    uint16_t valor_y = adc_read();
+
+    adc_select_input(1); //Eixo X
+    uint16_t valor_x = adc_read();
+
+    // Mapeia os valores do joystick para os limites do display
+    pos_y = map(valor_y, 0, 4095, limite_y_max, limite_y_min);
+    pos_x = map(valor_x, 0, 4095, limite_x_min, limite_x_max);
+
+    //Atualiza o display
+    ssd1306_fill(&ssd, false); //Limpa a tela
+
+    //Desenha uma borda simples
+    ssd1306_rect(&ssd, 0, 0, 128, 64, true, false);
+
+    //Desenha o quadrado que se move
+    ssd1306_rect(&ssd, pos_y, pos_x, tamanho_quadrado, tamanho_quadrado, true, true);
+    ssd1306_send_data(&ssd); // Envia para o display
+}
+
+
+
+int main(){
+    inicializar_componentes(); //Inicializar GPIOs, protocolos, comunicação...
+    
+    //Configura as chamadas de interrupções para os botões A e do Joystick
+    gpio_set_irq_enabled_with_callback(BOTAO_A, GPIO_IRQ_EDGE_FALL, true, &gpio_irq_handler);
+    gpio_set_irq_enabled_with_callback(BOTAO_B, GPIO_IRQ_EDGE_FALL, true, &gpio_irq_handler);
+
+    while(true){
+
+    }
+    return 0;
+}
