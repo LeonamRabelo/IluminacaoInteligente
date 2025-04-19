@@ -29,6 +29,7 @@
 #define NUM_PIXELS 25   //Quantidade de LEDs na matriz
 #define NUM_NUMBERS 11  //Quantidade de numeros na matriz
 
+uint buzzer_slice;
 bool economia = false;
 uint32_t ultimo_tempo_atividade = 0;
 uint volatile numero = 0;      //Variável para inicializar o numero com 0, indicando a camera 0 (WS2812B)
@@ -195,9 +196,14 @@ void inicializar_componentes(){
     adc_gpio_init(JOYSTICK_Y);
 
     // Inicializa buzzer
-    gpio_init(BUZZER_PIN);
-    gpio_set_dir(BUZZER_PIN, GPIO_OUT);
-    gpio_put(BUZZER_PIN, 0);
+    gpio_set_function(BUZZER_PIN, GPIO_FUNC_PWM);
+    buzzer_slice = pwm_gpio_to_slice_num(BUZZER_PIN);
+    float clkdiv = 125.0f; // Clock divisor
+    uint16_t wrap = (uint16_t)((125000000 / (clkdiv * 1000)) - 1);
+    pwm_set_clkdiv(buzzer_slice, clkdiv);
+    pwm_set_wrap(buzzer_slice, wrap);
+    pwm_set_gpio_level(BUZZER_PIN, wrap * 0.3f); // Define duty
+    pwm_set_enabled(buzzer_slice, false); // Começa desligado
 
     //Inicializa I2C para o display SSD1306
     i2c_init(i2c1, 400 * 1000);
@@ -215,16 +221,12 @@ void inicializar_componentes(){
     ssd1306_send_data(&ssd);
 }
 
-//Buzzer ativar e desativar
-void ativar_alerta(){
-    gpio_put(LED_RED, 1);
-    gpio_put(BUZZER_PIN, 1);
-    alerta = true;
-}
-void desativar_alerta() {
-    gpio_put(LED_RED, 0);
-    gpio_put(BUZZER_PIN, 0);
-    alerta = false;
+//Função para tocar o buzzer
+void bip_intercalado_suave() {
+    pwm_set_enabled(buzzer_slice, true);
+    sleep_ms(200);         // Duração do som
+    pwm_set_enabled(buzzer_slice, false);
+    sleep_ms(800);         // Pausa
 }
 
 // Debounce do botão (evita leituras falsas)
@@ -331,7 +333,7 @@ void verificar_presenca(int eixo_y){
             economia = true;
             set_one_led(0, 0, 0, 10); //Apaga a luz da matriz de leds, utilizando o indice 10 definido
             gpio_put(LED_RED, 1); //Liga o LED vermelho, indicando modo de economia
-            gpio_put(BUZZER_PIN, 1);    //Ativa o buzzer
+            bip_intercalado_suave();
         }
     }else{
         economia = false;
