@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <math.h>
 #include "pico/stdlib.h"
 #include "hardware/adc.h"
 #include "hardware/i2c.h"
@@ -28,6 +29,8 @@
 #define NUM_PIXELS 25   //Quantidade de LEDs na matriz
 #define NUM_NUMBERS 11  //Quantidade de numeros na matriz
 
+bool economia = false;
+uint32_t ultimo_tempo_atividade = 0;
 uint volatile numero = 0;      //Variável para inicializar o numero com 0, indicando a camera 0 (WS2812B)
 uint16_t adc_x = 0, adc_y = 0;
 bool modo_monitoramento = false;
@@ -39,8 +42,8 @@ uint32_t tempo_sem_movimento = 0;
 ssd1306_t ssd;
 //Variável global para armazenar a cor (Entre 0 e 255 para intensidade)
 uint8_t led_r = 20; //Intensidade do vermelho
-uint8_t led_g = 0; //Intensidade do verde
-uint8_t led_b = 0; //Intensidade do azul
+uint8_t led_g = 20; //Intensidade do verde
+uint8_t led_b = 20; //Intensidade do azul
 
 //Função para ligar um LED
 static inline void put_pixel(uint32_t pixel_grb){
@@ -162,7 +165,7 @@ void set_one_led(uint8_t r, uint8_t g, uint8_t b, int numero){
 void inicializar_componentes(){
     stdio_init_all();
 
-    // Inicializa botões
+    //Inicializa botões
     gpio_init(BOTAO_A);
     gpio_set_dir(BOTAO_A, GPIO_IN);
     gpio_pull_up(BOTAO_A);
@@ -212,8 +215,8 @@ void inicializar_componentes(){
     ssd1306_send_data(&ssd);
 }
 
-// === ALERTA ===
-void ativar_alerta() {
+//Buzzer ativar e desativar
+void ativar_alerta(){
     gpio_put(LED_RED, 1);
     gpio_put(BUZZER_PIN, 1);
     alerta = true;
@@ -266,7 +269,7 @@ int map(int valor, int in_min, int in_max, int out_min, int out_max) {
     return (valor - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
 
-void loop_display_quadrado() {
+void display_quadrado() {
     //Lê valores do joystick
     adc_select_input(0); //Eixo Y
     uint16_t valor_y = adc_read();
@@ -274,14 +277,14 @@ void loop_display_quadrado() {
     adc_select_input(1); //Eixo X
     uint16_t valor_x = adc_read();
 
-    // Mapeia os valores do joystick para os limites do display
+    //Mapeia os valores do joystick para os limites do display
     pos_y = map(valor_y, 0, 4095, limite_y_max, limite_y_min);
     pos_x = map(valor_x, 0, 4095, limite_x_min, limite_x_max);
 
     //Atualiza o display
     ssd1306_fill(&ssd, false); //Limpa a tela
 
-    //bordas
+    //Bordas
     ssd1306_rect(&ssd, 0, 0, 128, 64, true, false);
     ssd1306_rect(&ssd, 1, 1, 128 - 2, 64 - 2, true, false);
     ssd1306_rect(&ssd, 2, 2, 128 - 4, 64 - 4, true, false);
@@ -289,60 +292,83 @@ void loop_display_quadrado() {
 
     //Desenha o quadrado que se move
     ssd1306_rect(&ssd, pos_y, pos_x, tamanho_quadrado, tamanho_quadrado, true, true);
-    ssd1306_send_data(&ssd); // Envia para o display
+    ssd1306_send_data(&ssd); //Envia para o display
 }
 
-void loop_display_info(uint16_t x, uint16_t y) {
-    char linha1[20], linha2[20], linha3[30];
-    sprintf(linha1, "Area: %d", numero);
-    sprintf(linha2, "Luz: %.1f%%", (x / 4095.0) * 100);
-    sprintf(linha3, "Presenca: %s", y > 2000 ? "SIM" : "NAO");
+void display_info(int luminosidade, bool atividade) {
+    char buffer[32];
 
     ssd1306_fill(&ssd, false);
-    ssd1306_draw_string(&ssd, linha1, 10, 10);
-    ssd1306_draw_string(&ssd, linha2, 10, 30);
-    ssd1306_draw_string(&ssd, linha3, 10, 50);
+    if(economia){
+        sprintf(buffer, "Area: %d", numero);
+        ssd1306_draw_string(&ssd, buffer, 10, 10);
+        sprintf(buffer, "Modo Economia");
+        ssd1306_draw_string(&ssd, buffer, 10, 30);
+    }else{
+        sprintf(buffer, "Area: %d", numero);
+        ssd1306_draw_string(&ssd, buffer, 10, 10);
+        sprintf(buffer, "Luz: %d", luminosidade);
+        ssd1306_draw_string(&ssd, buffer, 10, 30);
+        sprintf(buffer, "Presenca: %s", atividade ? "Sim" : "Nao");
+        ssd1306_draw_string(&ssd, buffer, 10, 50);
+    }
     ssd1306_send_data(&ssd);
 }
 
+void atualizar_leds(int eixo_x){
+    if(economia) return;
+    //Calcula distância do centro (aproximadamente 2048)
+    int intensidade = abs(eixo_x - 2048) / 8; //Escala para 0-255 aprox
+    if (intensidade > 255) intensidade = 255;
+    set_one_led(intensidade, intensidade, intensidade, numero); //branco proporcional
+}
+
+void verificar_presenca(int eixo_y){
+    int distancia = abs(eixo_y - 2048);
+    //Ativa a economia de energia
+    if(distancia < 500){ //Sem atividade, intervalo do centro
+        if (to_ms_since_boot(get_absolute_time()) - ultimo_tempo_atividade > 2000){//2 segundos sem atividade
+            economia = true;
+            set_one_led(0, 0, 0, 10); //Apaga a luz da matriz de leds, utilizando o indice 10 definido
+            gpio_put(LED_RED, 1); //Liga o LED vermelho, indicando modo de economia
+            gpio_put(BUZZER_PIN, 1);    //Ativa o buzzer
+        }
+    }else{
+        economia = false;
+        gpio_put(LED_RED, 0); //atividade detectada
+        gpio_put(BUZZER_PIN, 0);
+        ultimo_tempo_atividade = to_ms_since_boot(get_absolute_time());
+    }
+}
+
+
 int main(){
     inicializar_componentes(); //Inicializar GPIOs, protocolos, comunicação...
-
-    set_one_led(led_r, led_g, led_b, 0); //Inicia a simulação monitorando o endereço 0
-
+    
     //Configura as chamadas de interrupções para os botões A e do Joystick
     gpio_set_irq_enabled_with_callback(BOTAO_A, GPIO_IRQ_EDGE_FALL, true, &gpio_irq_handler);
     gpio_set_irq_enabled_with_callback(BOTAO_B, GPIO_IRQ_EDGE_FALL, true, &gpio_irq_handler);
 
     while(true){
-        adc_select_input(0); adc_x = adc_read();
-        adc_select_input(1); adc_y = adc_read();
-
-        // Luminosidade da matriz
-        uint8_t intensidade = (adc_x * 255) / 4095;
-        set_one_led(intensidade, 0, 0, numero);
-
-        // Presença
-        if (adc_y < 1000) {
-            if (!alerta) {
-                if (tempo_sem_movimento == 0) tempo_sem_movimento = to_ms_since_boot(get_absolute_time());
-                if (to_ms_since_boot(get_absolute_time()) - tempo_sem_movimento > 3000) {
-                    ativar_alerta();
-                }
-            }
-        } else {
-            tempo_sem_movimento = 0;
-            if (alerta) desativar_alerta();
+        adc_select_input(0);
+        int eixo_y = adc_read();
+        adc_select_input(1);
+        int eixo_x = adc_read();
+    
+        if(!modo_monitoramento) {
+            display_quadrado();
+        }else{
+            display_info(abs(eixo_x - 2048) / 8, abs(eixo_y - 2048) > 500);
         }
-
-        // UART LOG
-        printf("[Area %d] Luz: %.2f%% - Presenca: %s\n", numero, (adc_x / 4095.0) * 100, adc_y > 1000 ? "SIM" : "NAO");
-
-        // Display
-        if (modo_monitoramento) loop_display_info(adc_x, adc_y);
-        else loop_display_quadrado(adc_x, adc_y);
-
-        sleep_ms(100);
+    
+        verificar_presenca(eixo_y);     //Sempre verificar presença primeiro
+        atualizar_leds(eixo_x);         //Só vai atualizar se economia == false
+        
+        // UART log
+        printf("Area: %d | Luz: %d | Presenca: %s\n", numero, abs(eixo_x - 2048) / 8,
+            abs(eixo_y - 2048) > 500 ? "Sim" : "Nao");
+    
+        sleep_ms(300);
     }
     return 0;
 }
