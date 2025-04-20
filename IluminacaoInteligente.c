@@ -221,20 +221,20 @@ void inicializar_componentes(){
     ssd1306_send_data(&ssd);
 }
 
-//Função para tocar o buzzer
-void bip_intercalado_suave() {
-    pwm_set_enabled(buzzer_slice, true);
-    sleep_ms(200);         // Duração do som
-    pwm_set_enabled(buzzer_slice, false);
-    sleep_ms(800);         // Pausa
+//Função para tocar o buzzer simulando a entrada no modo de economia
+void bip_intercalado_suave(){
+        pwm_set_enabled(buzzer_slice, true);
+        sleep_ms(200);         //Duração do som
+        pwm_set_enabled(buzzer_slice, false);
+        sleep_ms(800);         //Pausa  
 }
 
-// Debounce do botão (evita leituras falsas)
+//Debounce do botão (evita leituras falsas)
 bool debounce_botao(uint gpio){
     static uint32_t ultimo_tempo = 0;
     uint32_t tempo_atual = to_ms_since_boot(get_absolute_time());
 
-    if (gpio_get(gpio) == 0 && (tempo_atual - ultimo_tempo) > 200){ // 200ms de debounce
+    if (gpio_get(gpio) == 0 && (tempo_atual - ultimo_tempo) > 200){ //200ms de debounce
         ultimo_tempo = tempo_atual;
         return true;
     }
@@ -267,11 +267,11 @@ const int limite_x_min = 10;
 const int limite_x_max = 118 - tamanho_quadrado;
 
 //Função para mapear valores de um intervalo para outro
-int map(int valor, int in_min, int in_max, int out_min, int out_max) {
+int map(int valor, int in_min, int in_max, int out_min, int out_max){
     return (valor - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
 
-void display_quadrado() {
+void display_quadrado(){
     //Lê valores do joystick
     adc_select_input(0); //Eixo Y
     uint16_t valor_y = adc_read();
@@ -297,21 +297,21 @@ void display_quadrado() {
     ssd1306_send_data(&ssd); //Envia para o display
 }
 
-void display_info(int luminosidade, bool atividade) {
+void display_info(int luminosidade, bool atividade){
     char buffer[32];
 
     ssd1306_fill(&ssd, false);
     if(economia){
-        sprintf(buffer, "Area: %d", numero);
+        sprintf(buffer, "Area %d", numero);
         ssd1306_draw_string(&ssd, buffer, 10, 10);
         sprintf(buffer, "Modo Economia");
         ssd1306_draw_string(&ssd, buffer, 10, 30);
     }else{
-        sprintf(buffer, "Area: %d", numero);
+        sprintf(buffer, "Area %d", numero);
         ssd1306_draw_string(&ssd, buffer, 10, 10);
-        sprintf(buffer, "Luz: %d", luminosidade);
+        sprintf(buffer, "Luz em %d", luminosidade);
         ssd1306_draw_string(&ssd, buffer, 10, 30);
-        sprintf(buffer, "Presenca: %s", atividade ? "Sim" : "Nao");
+        sprintf(buffer, "Presenca %s", atividade ? "Sim" : "Nao");
         ssd1306_draw_string(&ssd, buffer, 10, 50);
     }
     ssd1306_send_data(&ssd);
@@ -343,7 +343,6 @@ void verificar_presenca(int eixo_y){
     }
 }
 
-
 int main(){
     inicializar_componentes(); //Inicializar GPIOs, protocolos, comunicação...
     
@@ -352,6 +351,7 @@ int main(){
     gpio_set_irq_enabled_with_callback(BOTAO_B, GPIO_IRQ_EDGE_FALL, true, &gpio_irq_handler);
 
     while(true){
+        int intensidade_percentual = 0;
         adc_select_input(0);
         int eixo_y = adc_read();
         adc_select_input(1);
@@ -360,14 +360,16 @@ int main(){
         if(!modo_monitoramento) {
             display_quadrado();
         }else{
-            display_info(abs(eixo_x - 2048) / 8, abs(eixo_y - 2048) > 500);
+            intensidade_percentual = (abs(eixo_x - 2048) * 100) / 2048;
+            if(intensidade_percentual > 100) intensidade_percentual = 100;
+            display_info(intensidade_percentual, abs(eixo_y - 2048) > 500);
         }
     
         verificar_presenca(eixo_y);     //Sempre verificar presença primeiro
         atualizar_leds(eixo_x);         //Só vai atualizar se economia == false
         
         // UART log
-        printf("Area: %d | Luz: %d | Presenca: %s\n", numero, abs(eixo_x - 2048) / 8,
+        printf("Area: %d | Luz: %d | Presenca: %s\n", numero, intensidade_percentual,
             abs(eixo_y - 2048) > 500 ? "Sim" : "Nao");
     
         sleep_ms(300);
