@@ -357,7 +357,7 @@ int main(){
             display_quadrado();     //Desenha o quadrado no display
         }else{
             intensidade_percentual = (abs(eixo_x - 2048) * 100) / 2048;     //Calcula a intensidade da luz em percentual
-            if(intensidade_percentual > 100) intensidade_percentual = 100;  //Limita para 0-100
+            if(intensidade_percentual > 100) intensidade_percentual = 100;  //Limita para 0-99
             display_info(intensidade_percentual, abs(eixo_y - 2048) > 500); //Mostra as informações no display
         }
     
@@ -365,9 +365,13 @@ int main(){
         atualizar_leds(eixo_x);         //Só vai atualizar se economia == false
         
         //UART - Comunicação Serial
+        if(economia){   //Se estamos em economia
+            printf("Area: %d | Modo Economia Ativado\n", numero);
+        }else{
         printf("Area: %d | Luz: %d | Presenca: %s\n", numero, intensidade_percentual,
             abs(eixo_y - 2048) > 500 ? "Sim" : "Nao");
-    
+        }
+
         sleep_ms(300);
     }
     return 0;
