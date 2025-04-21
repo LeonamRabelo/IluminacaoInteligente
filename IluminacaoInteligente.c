@@ -353,11 +353,12 @@ int main(){
         adc_select_input(1);            //Leitura do eixo X
         int eixo_x = adc_read();
     
+        intensidade_percentual = (abs(eixo_x - 2048) * 100) / 2048;     //Calcula a intensidade da luz em percentual
+        if(intensidade_percentual > 100) intensidade_percentual = 100;  //Limita para 0-99
+
         if(!modo_monitoramento){    //Verifica qual modo de monitoramento estamos utilizando
             display_quadrado();     //Desenha o quadrado no display
         }else{
-            intensidade_percentual = (abs(eixo_x - 2048) * 100) / 2048;     //Calcula a intensidade da luz em percentual
-            if(intensidade_percentual > 100) intensidade_percentual = 100;  //Limita para 0-99
             display_info(intensidade_percentual, abs(eixo_y - 2048) > 500); //Mostra as informações no display
         }
     
