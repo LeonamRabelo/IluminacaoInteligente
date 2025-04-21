@@ -1,4 +1,4 @@
-# Sistema de Monitoramento Inteligente com BitDogLab
+# Sistema de Monitoramento Inteligente de Iluminação e Presença com a BitDogLab
 
 Este projeto simula um sistema de **monitoramento de ambientes** utilizando a placa **BitDogLab** com o microcontrolador **RP2040**. O sistema monitora a presença de atividade e o nível de iluminação em áreas específicas, utilizando os periféricos embarcados para representar funcionalidades reais de um sistema de segurança ou automação predial.
 
@@ -67,6 +67,5 @@ Projeto totalmente desenvolvido em linguagem C com o SDK do RP2040.
 
 ## 👤 Autor
 Leonam Rabelo
-Repositório: github.com/LeonamRabelo
 
-**Link para vídeo explicativo:**
+**Link para vídeo explicativo:** [https://youtu.be/oTzIhcccWPs]
