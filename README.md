@@ -1,6 +1,6 @@
 # Sistema de Monitoramento Inteligente de Iluminação e Presença com a BitDogLab
 
-Este projeto simula um sistema de **monitoramento de ambientes** utilizando a placa **BitDogLab** com o microcontrolador **RP2040**. O sistema monitora a presença de atividade e o nível de iluminação em áreas específicas, utilizando os periféricos embarcados para representar funcionalidades reais de um sistema de segurança ou automação predial.
+Este projeto simula um sistema de **monitoramento de ambientes** utilizando a placa **BitDogLab** com o microcontrolador **RP2040**. O sistema monitora a presença de atividade e o nível de iluminação em áreas específicas, utilizando os periféricos embarcados para representar funcionalidades reais de um sistema de monitoramento e automação.
 
 ## 🎯 Objetivo
 
@@ -50,7 +50,7 @@ Criar um sistema capaz de simular o controle de presença e luminosidade em áre
 
 ## 📂 Organização do Projeto
 
-- `CondominioRuido.c`: Código-fonte principal
+- `IluminacaoInteligente.c`: Código-fonte principal
 - `inc/ssd1306.h`, `font.h`: Bibliotecas auxiliares para o display
 - `ws2812.pio.h`: Programa PIO para controlar a matriz WS2812B
 
